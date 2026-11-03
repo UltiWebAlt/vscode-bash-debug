@@ -44,6 +44,9 @@ export class BashDebugSession extends LoggingDebugSession {
     private launchArgs: LaunchRequestArguments;
 
     private proxyProcess: ChildProcess;
+    private debuggerTerminalProcess: ChildProcess;
+    private proxyStderr = "";
+    private debuggerTerminalStderr = "";
 
     private currentBreakpointIds = new Map<string, Array<number>>();
     private proxyData = new Map<string, string>();
@@ -57,6 +60,14 @@ export class BashDebugSession extends LoggingDebugSession {
     private outputEventSource = new EventSource();
 
     private debuggerProcessParentId = -1;
+
+    private baselineDeclarations = new Map<string, string>();
+    private baselineExportedVariables = new Set<string>();
+    private variableSnapshot: Array<{ name: string, declaration: string }> | undefined;
+    private currentScopeFrameId: number | undefined;
+    private debuggeeTerminated = false;
+    private terminationMessage = "";
+    private recentDebuggerOutput: string[] = [];
 
     public constructor() {
         super("bash-debug.txt");
@@ -156,10 +167,20 @@ export class BashDebugSession extends LoggingDebugSession {
             `"${args.pathBash}" "${args.pathBashdb}" --quiet --tty "${fifo_path}" --tty_in "${fifo_path}_in" --library "${args.pathBashdbLib}" -- "${args.programEffective}" ${quote(args.args)} ${args.argsString}`);
 
         if (this.launchArgs.terminalKind === "debugConsole" || this.launchArgs.terminalKind === undefined) {
-            spawnBashScript(
+            this.debuggerTerminalProcess = spawnBashScript(
                 command,
                 this.launchArgs.pathBash,
-                (data, category) => this.sendEvent(new OutputEvent(`${data}`, category)));
+                (data, category) => {
+                    if (category === "stderr") {
+                        this.debuggerTerminalStderr += `${data}`;
+                    }
+                    this.sendEvent(new OutputEvent(`${data}`, category));
+                });
+            this.debuggerTerminalProcess.on("exit", (code, signal) => {
+                const stderr = this.debuggerTerminalStderr.trim();
+                const detail = stderr === "" ? "" : `\nstderr:\n${stderr}`;
+                this.sendEvent(new OutputEvent(`[bash-debug] bashdb launcher exited (code=${code}, signal=${signal || "none"})${detail}\n`, "console"));
+            });
         }
         else {
             const currentShell = (process.platform === "win32") ? getWSLLauncherPath(true) : args.pathBash;
@@ -196,6 +217,7 @@ export class BashDebugSession extends LoggingDebugSession {
 
                     this.debuggerProcessParentId = parseInt(this.fullDebugOutput[i - 1]);
                     BashDebugSession.END_MARKER = `${this.debuggerProcessParentId}${BashDebugSession.END_MARKER}`;
+                    await this.captureBaseline();
                     this.sendResponse(response);
                     this.sendEvent(new OutputEvent(`Sending InitializedEvent`, 'telemetry'));
                     this.releaseDebugger();
@@ -286,6 +308,14 @@ export class BashDebugSession extends LoggingDebugSession {
 
     protected async stackTraceRequest(response: DebugProtocol.StackTraceResponse, args: DebugProtocol.StackTraceArguments): Promise<void> {
 
+        if (this.debuggeeTerminated) {
+            response.success = false;
+            response.message = this.terminationMessage;
+            response.body = { stackFrames: [], totalFrames: 0 };
+            this.sendResponse(response);
+            return;
+        }
+
         await this.onDebuggerAvailable();
 
         const currentLine = this.fullDebugOutput.length;
@@ -296,6 +326,14 @@ export class BashDebugSession extends LoggingDebugSession {
     private async stackTraceRequestFinalize(response: DebugProtocol.StackTraceResponse, args: DebugProtocol.StackTraceArguments, currentOutputLength: number): Promise<void> {
 
         while (await this.onNextDebuggerOutput()) {
+            if (this.debuggeeTerminated) {
+                response.success = false;
+                response.message = this.terminationMessage;
+                response.body = { stackFrames: [], totalFrames: 0 };
+                this.releaseDebugger();
+                this.sendResponse(response);
+                return;
+            }
             if (this.promptReached(currentOutputLength)) {
                 const lastStackLineIndex = this.fullDebugOutput.length - 3;
 
@@ -340,59 +378,236 @@ export class BashDebugSession extends LoggingDebugSession {
         }
     }
 
+    private async captureBaseline(): Promise<void> {
+        const discoveryStart = this.fullDebugOutput.length;
+        this.proxyProcess.stdin?.write(`eval compgen -v\nprint '${BashDebugSession.END_MARKER}'\n`);
+        while (await this.onNextDebuggerOutput()) {
+            if (this.promptReached(discoveryStart)) {
+                const names = this.discoverVariableNames(discoveryStart).filter(name => name !== "$PWD" && name !== "$?");
+                const valuesStart = this.fullDebugOutput.length;
+                let command = ``;
+                names.forEach(name => command += `print '__VSCODE_BASH_DEBUG_VARIABLE__ ${name}'\neval typeset -p ${name}\n`);
+                this.proxyProcess.stdin?.write(`${command}print '${BashDebugSession.END_MARKER}'\n`);
+                while (await this.onNextDebuggerOutput()) {
+                    if (this.promptReached(valuesStart)) {
+                        this.parseVariableValueRecords(valuesStart).forEach(record => {
+                            this.baselineDeclarations.set(record.name, record.declaration);
+                            if (/^declare\s+-[-a-zA-Z]*x/.test(record.declaration)) {
+                                this.baselineExportedVariables.add(record.name);
+                            }
+                        });
+                        return;
+                    }
+                }
+                return;
+            }
+        }
+    }
+
     protected async scopesRequest(response: DebugProtocol.ScopesResponse, _args: DebugProtocol.ScopesArguments): Promise<void> {
 
-        const scopes = [new Scope("Local", this.fullDebugOutputIndex, false)];
+        if (this.debuggeeTerminated) {
+            response.success = false;
+            response.message = this.terminationMessage;
+            response.body = { scopes: [] };
+            this.sendResponse(response);
+            return;
+        }
+
+        if (this.currentScopeFrameId !== _args.frameId) {
+            this.currentScopeFrameId = _args.frameId;
+            this.invalidateVariableSnapshot();
+        }
+
+        const scopes = [
+            new Scope("Script", 1, false),
+            new Scope("Environment", 2, false),
+            new Scope("Shell", 3, false),
+        ];
         response.body = { scopes: scopes };
         this.sendResponse(response);
     }
 
     protected async variablesRequest(response: DebugProtocol.VariablesResponse, args: DebugProtocol.VariablesArguments): Promise<void> {
 
-        await this.onDebuggerAvailable();
+        if (this.debuggeeTerminated) {
+            response.success = false;
+            response.message = this.terminationMessage;
+            response.body = { variables: [] };
+            this.sendResponse(response);
+            return;
+        }
 
-        let getVariablesCommand = `info program\n`;
-        const count = typeof args.count === 'number' ? args.count : 100;
-        const start = typeof args.start === 'number' ? args.start : 0;
-        let variableDefinitions = ["$PWD", "$? \\\# from '$_Dbg_last_bash_command'"];
-        variableDefinitions = variableDefinitions.slice(start, Math.min(start + count, variableDefinitions.length));
+        if (this.variableSnapshot !== undefined) {
+            this.sendVariablesResponse(response, args, this.variableSnapshot);
+            return;
+        }
 
-        variableDefinitions.forEach((v) => { getVariablesCommand += `print 'examine <${v}> '\nexamine ${v}\n`; });
+        try {
+            await this.onDebuggerAvailable();
 
-        const currentLine = this.fullDebugOutput.length;
-        this.proxyProcess.stdin?.write(`${getVariablesCommand}print '${BashDebugSession.END_MARKER}'\n`);
-        this.variablesRequestFinalize(response, args, currentLine);
+            // Names are discovered without expanding variable contents.
+            const currentLine = this.fullDebugOutput.length;
+            this.proxyProcess.stdin?.write(`eval compgen -v\nprint '${BashDebugSession.END_MARKER}'\n`);
+            this.variablesRequestFinalize(response, args, currentLine);
+        }
+        catch (error) {
+            this.completeVariablesRequest(response, error);
+        }
     }
 
-    private async variablesRequestFinalize(response: DebugProtocol.VariablesResponse, _args: DebugProtocol.VariablesArguments, currentOutputLength: number): Promise<void> {
+    private async variablesRequestFinalize(response: DebugProtocol.VariablesResponse, args: DebugProtocol.VariablesArguments, currentOutputLength: number): Promise<void> {
 
-        while (await this.onNextDebuggerOutput()) {
-            if (this.promptReached(currentOutputLength)) {
-                const variables: DebugProtocol.Variable[] = [];
-
-                for (let i = currentOutputLength; i < this.fullDebugOutput.length - 2; i++) {
-
-                    if (this.fullDebugOutput[i - 1].indexOf("examine <") === 0 && this.fullDebugOutput[i - 1].indexOf("> ") > 0) {
-
-                        variables.push({
-                            name: `${this.fullDebugOutput[i - 1].replace("examine <", "").replace("> ", "").split('#')[0]}`,
-                            type: "string",
-                            value: this.fullDebugOutput[i],
-                            variablesReference: 0
-                        });
-                    }
+        try {
+            while (await this.onNextDebuggerOutput()) {
+                if (this.debuggeeTerminated) {
+                    this.completeVariablesRequest(response, new Error(this.terminationMessage));
+                    return;
                 }
+                if (this.promptReached(currentOutputLength)) {
+                    const names = this.discoverVariableNames(currentOutputLength);
+                    const valuesStart = this.fullDebugOutput.length;
+                    let command = ``;
+                    names.forEach(name => {
+                        command += `print '__VSCODE_BASH_DEBUG_VARIABLE__ ${name}'\n`;
+                        command += name === "$?" ? `examine $? \\\# exit status\n` : `eval typeset -p ${name === "$PWD" ? "PWD" : name}\n`;
+                    });
+                    this.proxyProcess.stdin?.write(`${command}print '${BashDebugSession.END_MARKER}'\n`);
+                    this.variablesValuesRequestFinalize(response, args, valuesStart);
+                    return;
+                }
+            }
+            this.completeVariablesRequest(response, new Error("bashdb closed while discovering variables"));
+        }
+        catch (error) {
+            this.completeVariablesRequest(response, error);
+        }
+    }
 
-                response.body = { variables: variables };
-                this.releaseDebugger();
-                this.sendResponse(response);
-                return;
+    private sendVariablesResponse(response: DebugProtocol.VariablesResponse, args: DebugProtocol.VariablesArguments, records: Array<{ name: string, declaration: string }>): void {
+        const variables = records.filter(record => this.variableScope(record.name, record.declaration) === args.variablesReference)
+            .map(record => this.createVariable(record.name, record.declaration));
+        const start = typeof args.start === 'number' ? args.start : 0;
+        const count = typeof args.count === 'number' ? args.count : variables.length;
+        response.body = { variables: variables.slice(start, Math.min(start + count, variables.length)) };
+        this.sendResponse(response);
+    }
+
+    private async variablesValuesRequestFinalize(response: DebugProtocol.VariablesResponse, args: DebugProtocol.VariablesArguments, currentOutputLength: number): Promise<void> {
+        try {
+            while (await this.onNextDebuggerOutput()) {
+                if (this.debuggeeTerminated) {
+                    this.completeVariablesRequest(response, new Error(this.terminationMessage));
+                    return;
+                }
+                if (this.promptReached(currentOutputLength)) {
+                    this.variableSnapshot = this.parseVariableValueRecords(currentOutputLength);
+                    this.sendVariablesResponse(response, args, this.variableSnapshot);
+                    this.releaseDebugger();
+                    return;
+                }
+            }
+            this.completeVariablesRequest(response, new Error("bashdb closed while reading variables"));
+        }
+        catch (error) {
+            this.completeVariablesRequest(response, error);
+        }
+    }
+
+    private invalidateVariableSnapshot(): void {
+        this.variableSnapshot = undefined;
+    }
+
+    private discoverVariableNames(currentOutputLength: number): string[] {
+        const names = new Set<string>();
+
+        for (let i = currentOutputLength; i < this.fullDebugOutput.length - 2; i++) {
+            const name = this.fullDebugOutput[i];
+            if (/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(name) && !name.startsWith("_Dbg_")) {
+                names.add(name);
             }
         }
+
+        // Keep the previously exposed names, while using the safe declaration
+        // path for PWD. $? is not a shell variable and is added separately.
+        const result = Array.from(names).sort();
+        const pwdIndex = result.indexOf("PWD");
+        if (pwdIndex >= 0) {
+            result[pwdIndex] = "$PWD";
+        }
+        else {
+            result.push("$PWD");
+        }
+        result.push("$?");
+        return result;
+    }
+
+    private parseVariableValueRecords(currentOutputLength: number): Array<{ name: string, declaration: string }> {
+        const variables: Array<{ name: string, declaration: string }> = [];
+        const marker = "__VSCODE_BASH_DEBUG_VARIABLE__ ";
+        let name: string | undefined;
+        let valueLines: string[] = [];
+
+        const addVariable = () => {
+            if (name !== undefined) {
+                variables.push({ name: name, declaration: valueLines.filter(line => !/^\$\? is [0-9]+$/.test(line)).join("\n") });
+            }
+        };
+
+        for (let i = currentOutputLength; i < this.fullDebugOutput.length - 2; i++) {
+            const line = this.fullDebugOutput[i];
+            if (line.startsWith(marker)) {
+                addVariable();
+                name = line.substr(marker.length);
+                valueLines = [];
+            }
+            else if (name !== undefined) {
+                valueLines.push(line);
+            }
+        }
+        addVariable();
+        return variables;
+    }
+
+    private createVariable(name: string, declaration: string): DebugProtocol.Variable {
+        const match = /^declare(?:\s+(-[-a-zA-Z]+))?\s+[a-zA-Z_][a-zA-Z0-9_]*(?:=(.*))?$/s.exec(declaration);
+        const flags = match && match[1] ? match[1] : "";
+        const value = match ? (match[2] === undefined ? "<unset>" : match[2]) : (declaration || "<unset>");
+        const type = flags.indexOf("A") >= 0 ? "associative array" : flags.indexOf("a") >= 0 ? "array" : "string";
+
+        return { name: name, type: type, value: value, variablesReference: 0 };
+    }
+
+    private variableScope(name: string, declaration: string): number {
+        const shellSpecials = new Set([
+            "$PWD", "$?", "BASH", "BASHOPTS", "BASHPID", "BASH_ALIASES", "BASH_ARGC", "BASH_ARGV",
+            "BASH_ARGV0", "BASH_CMDS", "BASH_COMMAND", "BASH_LINENO", "BASH_REMATCH", "BASH_SOURCE",
+            "BASH_SUBSHELL", "BASH_VERSINFO", "BASH_VERSION", "DIRSTACK", "EPOCHREALTIME", "EPOCHSECONDS",
+            "FUNCNAME", "LINENO", "PIPESTATUS", "PPID", "RANDOM", "SECONDS", "SRANDOM"
+        ]);
+        if (shellSpecials.has(name)) {
+            return 3;
+        }
+        const baseline = this.baselineDeclarations.get(name);
+        if (baseline === undefined || baseline !== declaration) {
+            return 1;
+        }
+        return this.baselineExportedVariables.has(name) ? 2 : 3;
+    }
+
+    private completeVariablesRequest(response: DebugProtocol.VariablesResponse, error?: unknown): void {
+        if (error !== undefined) {
+            response.success = false;
+            response.message = error instanceof Error ? error.message : String(error);
+            response.body = { variables: [] };
+        }
+        this.releaseDebugger();
+        this.sendResponse(response);
     }
 
     protected async continueRequest(response: DebugProtocol.ContinueResponse, args: DebugProtocol.ContinueArguments): Promise<void> {
 
+        this.invalidateVariableSnapshot();
         await this.onDebuggerAvailable();
 
         const currentLine = this.fullDebugOutput.length;
@@ -420,6 +635,7 @@ export class BashDebugSession extends LoggingDebugSession {
 
     protected async nextRequest(response: DebugProtocol.NextResponse, args: DebugProtocol.NextArguments): Promise<void> {
 
+        this.invalidateVariableSnapshot();
         await this.onDebuggerAvailable();
 
         const currentLine = this.fullDebugOutput.length;
@@ -444,6 +660,7 @@ export class BashDebugSession extends LoggingDebugSession {
 
     protected async stepInRequest(response: DebugProtocol.StepInResponse, args: DebugProtocol.StepInArguments): Promise<void> {
 
+        this.invalidateVariableSnapshot();
         await this.onDebuggerAvailable();
 
         const currentLine = this.fullDebugOutput.length;
@@ -468,6 +685,7 @@ export class BashDebugSession extends LoggingDebugSession {
 
     protected async stepOutRequest(response: DebugProtocol.StepOutResponse, args: DebugProtocol.StepOutArguments): Promise<void> {
 
+        this.invalidateVariableSnapshot();
         await this.onDebuggerAvailable();
 
         const currentLine = this.fullDebugOutput.length;
@@ -496,6 +714,7 @@ export class BashDebugSession extends LoggingDebugSession {
 
     protected async evaluateRequest(response: DebugProtocol.EvaluateResponse, args: DebugProtocol.EvaluateArguments): Promise<void> {
 
+        this.invalidateVariableSnapshot();
         await this.onDebuggerAvailable();
 
         const currentLine = this.fullDebugOutput.length;
@@ -547,6 +766,7 @@ export class BashDebugSession extends LoggingDebugSession {
     private processDebugTerminalOutput(): void {
 
         this.proxyProcess.stdio[2]?.on('data', (data) => {
+            this.proxyStderr += data.toString();
             const list = data.toString().split("\n");
             list.forEach(l => {
                 const nodes = l.split("::");
@@ -556,22 +776,38 @@ export class BashDebugSession extends LoggingDebugSession {
             });
         });
 
+        this.proxyProcess.on("exit", (code, signal) => {
+            const stderr = this.proxyStderr.split("\n").filter(line => !line.startsWith("::PROXYID::") && line !== "").join("\n");
+            const detail = stderr === "" ? "" : `\nstderr:\n${stderr}`;
+            this.sendEvent(new OutputEvent(`[bash-debug] proxy exited (code=${code}, signal=${signal || "none"})${detail}\n`, "console"));
+            this.debuggerExecutableClosing = true;
+            this.outputEventSource.setEvent();
+        });
+
         this.outputEventSource.schedule(() => {
             for (; this.fullDebugOutputIndex < this.fullDebugOutput.length - 1; this.fullDebugOutputIndex++) {
                 const line = this.fullDebugOutput[this.fullDebugOutputIndex];
+                this.recentDebuggerOutput.push(line);
+                if (this.recentDebuggerOutput.length > 12) {
+                    this.recentDebuggerOutput.shift();
+                }
 
-                if (line.indexOf("(") === 0 && line.indexOf("):") === line.length - 2) {
+                if (!this.debuggeeTerminated && line.indexOf("(") === 0 && line.indexOf("):") === line.length - 2 && !this.isBashdbLocation(line)) {
                     this.sendEvent(new OutputEvent(`Sending StoppedEvent`, 'telemetry'));
                     this.sendEvent(new StoppedEvent("break", BashDebugSession.THREAD_ID));
                 }
-                else if (line.indexOf("Program received signal ") === 0) {
+                else if (!this.debuggeeTerminated && line.indexOf("Program received signal ") === 0) {
                     this.sendEvent(new OutputEvent(`Sending StoppedEvent`, 'telemetry'));
                     this.sendEvent(new StoppedEvent("break", BashDebugSession.THREAD_ID));
                 }
-                else if (line.indexOf("Debugged program terminated") === 0) {
+                else if (!this.debuggeeTerminated && line.indexOf("Debugged program terminated") === 0) {
+                    this.debuggeeTerminated = true;
+                    this.terminationMessage = line;
                     this.proxyProcess.stdin?.write(`\nq\n`);
+                    this.sendEvent(new OutputEvent(`[bash-debug] ${line}\nraw output before termination:\n${this.recentDebuggerOutput.join("\n")}\n`, "console"));
                     this.sendEvent(new OutputEvent(`Sending TerminatedEvent`, 'telemetry'));
                     this.sendEvent(new TerminatedEvent());
+                    this.releaseDebugger();
                 }
             }
         });
@@ -584,6 +820,10 @@ export class BashDebugSession extends LoggingDebugSession {
             list.forEach(l => this.fullDebugOutput.push(this.removePrompt(l)));
             this.outputEventSource.setEvent();
         });
+    }
+
+    private isBashdbLocation(line: string): boolean {
+        return line.indexOf("/bashdb_dir/") >= 0 || line.indexOf("\\bashdb_dir\\") >= 0;
     }
 
     private async onDebuggerAvailable(): Promise<void> {
