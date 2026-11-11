@@ -1,14 +1,14 @@
 language: node_js
 
 node_js:
-- '12.18.3'
+- '26'
 
 os:
 - linux
 
 group: dev
 sudo: required
-dist: bionic
+dist: jammy
 
 branches:
   only:
@@ -20,9 +20,11 @@ env:
     - RELEASE_TAG_EXPRESSION=^v?[0-9]+\.[0-9]+\.[0-9]+$
 
 install:
-- npm install
+- npm ci
 
 script:
+- npm run compile
+- npm run lint
 - npm run test
 - npm run package
 
@@ -48,6 +50,4 @@ deploy:
       tags: true
       condition: "$TRAVIS_TAG =~ $RELEASE_TAG_EXPRESSION"
 
-cache:
-  directories:
-    - node_modules
+cache: npm
