@@ -22,11 +22,5 @@ jobs:
       - uses: github/codeql-action/init@v3
         with:
           languages: javascript-typescript
-          build-mode: manual
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '26'
-          cache: npm
-      - run: npm ci
-      - run: npm run compile
+          build-mode: none
       - uses: github/codeql-action/analyze@v3
