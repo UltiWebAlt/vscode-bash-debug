@@ -16,7 +16,7 @@ permissions:
 jobs:
   analyze:
     name: Analyze TypeScript
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: github/codeql-action/init@v3
@@ -25,7 +25,7 @@ jobs:
           build-mode: manual
       - uses: actions/setup-node@v4
         with:
-          node-version: 12.18.3
+          node-version: '26'
           cache: npm
       - run: npm ci
       - run: npm run compile
