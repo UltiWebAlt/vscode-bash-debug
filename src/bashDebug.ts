@@ -278,7 +278,7 @@ export class BashDebugSession extends LoggingDebugSession {
         while (await this.onNextDebuggerOutput()) {
             if (this.promptReached(currentOutputLength)) {
                 this.currentBreakpointIds[args.source.path] = [];
-                const breakpoints = new Array<Breakpoint>();
+                const breakpoints: DebugProtocol.Breakpoint[] = [];
 
                 for (let i = currentOutputLength; i < this.fullDebugOutput.length - 2; i++) {
 
