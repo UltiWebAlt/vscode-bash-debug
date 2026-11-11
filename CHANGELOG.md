@@ -2,6 +2,8 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [0.4.1](https://github.com/UltiWebAlt/vscode-bash-debug/compare/v0.3.9...v0.4.1) (2026-11-11)
+
 ### [0.3.9](https://github.com/rogalmic/vscode-bash-debug/compare/v0.3.8...v0.3.9) (2020-06-15)
 
 
