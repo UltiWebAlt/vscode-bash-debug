@@ -1,67 +1,86 @@
-# VS Code Bash Debug
+# Bash Debug
 
-A bash debugger GUI frontend based on awesome `bashdb` scripts (bashdb now included in package).
-I have updated this so it works with Neovim and did some code optimizations. Security updates are coming as this is really out of date.
+Bash Debug is a VS Code debugger extension and a Debug Adapter Protocol (DAP) adapter built on [bashdb](https://bashdb.sourceforge.net/). This repository is maintained by UltiWebAlt as a fork of [rogalmic/vscode-bash-debug](https://github.com/rogalmic/vscode-bash-debug). The VSIX includes bashdb, the compiled adapter, and its runtime dependencies.
 
-# Overview
+The adapter can also be used by Neovim through Mason and nvim-dap. The VS Code extension UI and configuration provider run only in VS Code.
 
-This is a SIMPLE bashdb debugger frontend. Useful for learning bash shell usage and writing simple scripts.
+## Install in VS Code
 
-Useful hint: shellcheck extension does a great job with finding common script errors before debugging.
+Download the VSIX from the [latest GitHub release](https://github.com/UltiWebAlt/vscode-bash-debug/releases/latest), then choose **Extensions → Install from VSIX** in VS Code. You can also install a downloaded file from a shell:
 
-## Usage
+```sh
+code --install-extension bash-debug-0.4.3.vsix
+```
 
-1. Select **Debug -> Add Configuration** to add custom debug configuration (drop-down, path-input, etc...)
-1. Select **Debug -> Start Debugging (F5)** to start debugging
+The repository does not currently publish automatically to the VS Code Marketplace or Open VSX.
 
-See <https://code.visualstudio.com/docs/editor/debugging> for general usage.
+## Requirements
 
-## Sample features
+- VS Code 1.146 or newer for the extension. Neovim uses the DAP adapter separately.
+- Bash 4.x or 5.x. The adapter checks for these major versions before launching.
+- `cat`, `mkfifo`, `pkill`, `rm`, and `sleep` available in the environment where Bash runs.
+- A Bash script to debug. The VSIX supplies bashdb; a separate bashdb installation is normally unnecessary.
 
-- Debugging auto-configuration via `launch.json`
+On macOS, the system Bash may be version 3. Install Bash 4 or 5 and set `pathBash` to that executable. On Windows, use WSL with a supported Bash version. Paths passed to Bash tools must resolve inside WSL. The automated build and tests currently run on Linux, so macOS and WSL behavior should be checked on those systems.
 
-[<img src="https://raw.githubusercontent.com/rogalmic/vscode-bash-debug/gif/images/bash-debug-samp-launch-autoconfig.gif" width="400" style="filter: blur(1px); " title="Click to show in browser" />](https://raw.githubusercontent.com/rogalmic/vscode-bash-debug/gif/images/bash-debug-samp-launch-autoconfig.gif)
+## Debug a script in VS Code
 
-- Simple debugging in hello world application
+Add a configuration to `.vscode/launch.json`:
 
-[<img src="https://raw.githubusercontent.com/rogalmic/vscode-bash-debug/gif/images/bash-debug-samp-hello-world.gif" width="400" style="filter: blur(1px); " title="Click to show in browser"/>](https://raw.githubusercontent.com/rogalmic/vscode-bash-debug/gif/images/bash-debug-samp-hello-world.gif)
+```json
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "bashdb",
+      "request": "launch",
+      "name": "Debug current Bash file",
+      "program": "${file}",
+      "cwd": "${workspaceFolder}",
+      "terminalKind": "integrated"
+    }
+  ]
+}
+```
 
-- Standard input handling via terminal
+Open a Bash script and start debugging with **F5**. You can set breakpoints, step through commands, inspect the stack and variables, evaluate expressions, and use conditional breakpoints. Choose `terminalKind: "integrated"` or `"external"` for scripts that read standard input. The default `"debugConsole"` is useful for noninteractive scripts.
 
-[<img src="https://raw.githubusercontent.com/rogalmic/vscode-bash-debug/gif/images/bash-debug-samp-stdin-usage.gif" width="400" style="filter: blur(1px); " title="Click to show in browser"/>](https://raw.githubusercontent.com/rogalmic/vscode-bash-debug/gif/images/bash-debug-samp-stdin-usage.gif)
+VS Code fills in the bundled bashdb paths and defaults for omitted settings. Common launch settings are:
 
-- Pause support while script is running
+| Setting | Purpose |
+| --- | --- |
+| `args` | Array of script arguments, for example `["--mode", "test"]`. |
+| `argsString` | Additional arguments appended as shell text. Prefer `args` for ordinary arguments. |
+| `env` | Environment variables supplied to the script as an object. |
+| `pathBash` | Bash executable; defaults to `bash`. |
+| `pathBashdb`, `pathBashdbLib` | Override the bundled bashdb executable and library directory. |
+| `pathCat`, `pathMkfifo`, `pathPkill` | Override paths to required utilities. |
+| `terminalKind` | `debugConsole`, `integrated`, or `external`. |
+| `showDebugOutput`, `trace` | Show bashdb output or DAP trace output when diagnosing a session. |
 
-[<img src="https://raw.githubusercontent.com/rogalmic/vscode-bash-debug/gif/images/bash-debug-samp-pause-support.gif" width="400" style="filter: blur(1px); " title="Click to show in browser"/>](https://raw.githubusercontent.com/rogalmic/vscode-bash-debug/gif/images/bash-debug-samp-pause-support.gif)
+## Use the adapter in Neovim
 
-- Advanced "Watch" and "Debug console" usage
+Mason's default `bash-debug-adapter` package still refers to the original Rogalmic VSIX. To install this fork's release through Mason, put a [custom registry](https://github.com/UltiWebAlt/nvim-config/tree/main/lua/mason_bash_registry) ahead of the core registry. The [UltiWebAlt Neovim configuration](https://github.com/UltiWebAlt/nvim-config/blob/main/lua/plugins/mason-bash-registry.lua) contains a working example that points to this repository's `v0.4.3` VSIX.
 
-[<img src="https://raw.githubusercontent.com/rogalmic/vscode-bash-debug/gif/images/bash-debug-samp-watch-advanced.gif" width="400" style="filter: blur(1px); " title="Click to show in browser"/>](https://raw.githubusercontent.com/rogalmic/vscode-bash-debug/gif/images/bash-debug-samp-watch-advanced.gif)
+After adding the registry, run `:MasonUpdate` and `:MasonInstall --force bash-debug-adapter`. With `mason-nvim-dap.nvim`, the Bash adapter resolves to Mason's `bash-debug-adapter` executable. No path to a local checkout of this repository is needed. The registry definition pins a release; update its version and VSIX filename when moving to a newer release.
 
-- Conditional breakpoints usage
+## Build from source
 
-[<img src="https://raw.githubusercontent.com/rogalmic/vscode-bash-debug/gif/images/bash-debug-samp-conditional-breakpoints.gif" width="400" style="filter: blur(1px); " title="Click to show in browser"/>](https://raw.githubusercontent.com/rogalmic/vscode-bash-debug/gif/images/bash-debug-samp-conditional-breakpoints.gif)
+Use the Node version in [`.nvmrc`](.nvmrc) for development. Then run:
 
-For Windows users:
+```sh
+npm ci
+npm run lint
+npm test
+npm run package
+```
 
-- Install [Windows Subsystem for Linux](https://en.wikipedia.org/wiki/Windows_Subsystem_for_Linux)
-- Terminal has problems with spaces in paths when powershell is used, use [WSL bash](https://github.com/Microsoft/vscode/issues/22317) instead. For beta WSL please read [this](https://github.com/rogalmic/vscode-bash-debug/issues/93)
-- `pathBash` refers to BASH binary path in WSL filesystem, not path to `wsl.exe`/`bash.exe`
+`npm test` compiles the TypeScript source and runs the Jasmine tests. `npm run package` creates a VSIX in the repository root. GitHub Actions runs clean installation, compilation, linting, tests, and packaging on pushes and pull requests to `master` and `develop`. The [CodeQL workflow](.github/workflows/codeql.yml) also analyzes the TypeScript code.
 
-For macOS users:
+## Current limitations
 
-- Read [here](https://github.com/rogalmic/vscode-bash-debug/wiki/macOS:-avoid-use-of--usr-local-bin-pkill) if your mac has `/usr/local/bin/pkill`.
-- Install `bash` version `4.*` and set `pathBash` properly
+- Interactive scripts need an integrated or external terminal for standard input.
+- bashdb may stop at the first command when a session starts.
+- While debugging, `$0` can refer to bashdb rather than the script, and stepping may overwrite `BASH_REMATCH`.
 
-## Dependencies
-
-1. `bash` version `4.0` or later
-2. `cat`, `mkfifo`, `rm`, `pkill`
-
-## Limitations and known problems
-
-- Use `terminalKind`@`launch.json` set to `integrated` or `external` for interactive scripts (using stdin)
-- Currently debugger stops at first command
-- `$0` variable shows path to bashdb
-- Older `bash` versions ( `4.0` - `4.2` ) are not tested, but might work™
-- `BASH_REMATCH` gets overwritten when stepping through code
+Report reproducible problems in the [fork's issue tracker](https://github.com/UltiWebAlt/vscode-bash-debug/issues).
