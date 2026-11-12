@@ -1,7 +1,7 @@
 {
     "name": "bash-debug",
     "displayName": "Bash Debug",
-    "version": "0.4.1",
+    "version": "0.4.2",
     "publisher": "ultiwebalt",
     "description": "A fork of Michal Rogalinski's Bash Debug extension, maintained by Randy Burgess.",
     "author": {
@@ -22,8 +22,7 @@
         "multi-root ready"
     ],
     "engines": {
-        "vscode": "^1.40.0",
-        "node": "^26.0.0"
+        "vscode": "^1.40.0"
     },
     "icon": "images/bash-debug-icon.png",
     "categories": [
@@ -56,11 +55,10 @@
         }
     ],
     "dependencies": {
-        "child-process": "^1.0.2",
+        "@vscode/debugadapter": "1.68.0",
+        "@vscode/debugprotocol": "1.68.0",
         "npm-which": "^3.0.1",
-        "shell-quote": "^1.12.0",
-        "vscode-debugadapter": "1.51.0",
-        "vscode-debugprotocol": "1.51.0"
+        "shell-quote": "^1.12.0"
     },
     "devDependencies": {
         "@types/jasmine": "^7.0.0",
@@ -68,18 +66,17 @@
         "@types/vscode": "1.40.0",
         "@typescript-eslint/eslint-plugin": "^8.72.2",
         "@typescript-eslint/parser": "^8.72.2",
+        "@typescript/native": "npm:typescript@~7.0.2",
         "@vscode/vsce": "^4.1.0",
         "eslint": "^10.14.0",
         "jasmine": "^7.0.0",
         "ovsx": "^1.4.0",
-        "standard-version": "^9.5.0",
         "ts-node": "^10.9.2",
-        "@typescript/native": "npm:typescript@~7.0.2",
-        "typescript": "npm:@typescript/typescript6@~6.0.2",
-        "vscode-debugadapter-testsupport": "1.51.0"
+        "typescript": "npm:@typescript/typescript6@~6.0.2"
     },
     "overrides": {
-        "minimatch@^10": "^11.0.8"
+        "minimatch@^10": "^11.0.8",
+        "glob": "^14.0.6"
     },
     "scripts": {
         "prepublish": "tsc -p ./src",
@@ -88,8 +85,7 @@
         "watch": "tsc -w -p ./src",
         "test": "npm run compile && jasmine --config=jasmine.json",
         "package": "vsce package",
-        "publish": "vsce publish",
-        "release": "standard-version"
+        "publish": "vsce publish"
     },
     "main": "./out/extension.js",
     "activationEvents": [

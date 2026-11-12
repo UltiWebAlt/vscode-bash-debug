@@ -39,7 +39,9 @@ export function _validatePath(cwd: string,
         `test -d "${cwd}" || exit ${vpr.notExistCwd};` +
         `[[ "$BASH_VERSION" == 4.* ]] || [[ "$BASH_VERSION" == 5.* ]] || exit ${vpr.unsupportedBashVersion};`, pathBash, spawnTimeout);
 
-    if (proc.error !== undefined) {
+    // Some runtimes report a process error even when the shell completed and
+    // supplied a valid exit status. In that case its exit status is authoritative.
+    if (proc.status === null && proc.error !== undefined) {
 
         if (proc.error?.["code"] === "ENOENT") {
             return [vpr.notFoundBash, ""];

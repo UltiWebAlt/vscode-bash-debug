@@ -1,8 +1,16 @@
 .vscode/**
 .vscode-test/**
+.github/**
+.idea/**
 src/**
+test-fixtures/**
 .gitignore
 .travis.yml
+eslint.config.js
+jasmine.json
+.nvmrc
+bash-debug.code-workspace
+out/*spec.js
 **/tsconfig.json
 **/tslint.json
 **/*.map

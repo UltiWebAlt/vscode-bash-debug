@@ -3,8 +3,8 @@ import {
     DebugSession, LoggingDebugSession,
     InitializedEvent, TerminatedEvent, StoppedEvent, OutputEvent,
     Thread, StackFrame, Scope, Source, Breakpoint
-} from 'vscode-debugadapter';
-import { DebugProtocol } from 'vscode-debugprotocol';
+} from '@vscode/debugadapter';
+import { DebugProtocol } from '@vscode/debugprotocol';
 import { ChildProcess } from 'child_process';
 import { basename, normalize, join, isAbsolute } from 'path';
 import * as fs from 'fs';

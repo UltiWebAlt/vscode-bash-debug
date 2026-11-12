@@ -1,6 +1,13 @@
 # Changelog
 
-All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
+All notable changes to this project will be documented in this file.
+
+### [0.4.2](https://github.com/UltiWebAlt/vscode-bash-debug/compare/v0.4.1...v0.4.2) (2026-11-12)
+
+- Update to maintained VS Code debug adapter and protocol packages.
+- Remove unused and deprecated dependencies and resolve the reported `glob` advisory.
+- Accept a completed shell exit status when validating the debugger environment.
+- Package only the files needed by the extension.
 
 ### [0.4.1](https://github.com/UltiWebAlt/vscode-bash-debug/compare/v0.3.9...v0.4.1) (2026-11-11)
 
