@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+### [0.4.3](https://github.com/UltiWebAlt/vscode-bash-debug/compare/v0.4.2...v0.4.3) (2026-11-12)
+
+- Make the environment validation timeout test reliable on fast CI runners.
+
 ### [0.4.2](https://github.com/UltiWebAlt/vscode-bash-debug/compare/v0.4.1...v0.4.2) (2026-11-12)
 
 - Update to maintained VS Code debug adapter and protocol packages.

@@ -1,4 +1,5 @@
 import { validatePath, validatePathResult, _validatePath } from "./bashRuntime";
+import { join } from "path";
 
 describe("bashRuntime - validatePath", () => {
 
@@ -71,7 +72,7 @@ describe("bashRuntime - _validatePath", () => {
 
     it("returns timeout when timeout", () => {
 
-        expect(_validatePath("./", "bash", "", "", "", "", 1))
+        expect(_validatePath("./", join(__dirname, "../test-fixtures/slow-bash.sh"), "type", "type", "type", "type", 50))
             .toEqual([validatePathResult.timeout, ""]);
     });
 });
