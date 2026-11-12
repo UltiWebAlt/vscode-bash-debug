@@ -9,7 +9,7 @@ The adapter can also be used by Neovim through Mason and nvim-dap. The VS Code e
 Download the VSIX from the [latest GitHub release](https://github.com/UltiWebAlt/vscode-bash-debug/releases/latest), then choose **Extensions → Install from VSIX** in VS Code. You can also install a downloaded file from a shell:
 
 ```sh
-code --install-extension bash-debug-0.4.3.vsix
+code --install-extension bash-debug-0.4.4.vsix
 ```
 
 The repository does not currently publish automatically to the VS Code Marketplace or Open VSX.
@@ -60,7 +60,7 @@ VS Code fills in the bundled bashdb paths and defaults for omitted settings. Com
 
 ## Use the adapter in Neovim
 
-Mason's default `bash-debug-adapter` package still refers to the original Rogalmic VSIX. To install this fork's release through Mason, put a [custom registry](https://github.com/UltiWebAlt/nvim-config/tree/main/lua/mason_bash_registry) ahead of the core registry. The [UltiWebAlt Neovim configuration](https://github.com/UltiWebAlt/nvim-config/blob/main/lua/plugins/mason-bash-registry.lua) contains a working example that points to this repository's `v0.4.3` VSIX.
+Mason's default `bash-debug-adapter` package still refers to the original Rogalmic VSIX. To install this fork's release through Mason, put a [custom registry](https://github.com/UltiWebAlt/nvim-config/tree/main/lua/mason_bash_registry) ahead of the core registry. The [UltiWebAlt Neovim configuration](https://github.com/UltiWebAlt/nvim-config/blob/main/lua/plugins/mason-bash-registry.lua) contains a working example that points to this repository's `v0.4.4` VSIX.
 
 After adding the registry, run `:MasonUpdate` and `:MasonInstall --force bash-debug-adapter`. With `mason-nvim-dap.nvim`, the Bash adapter resolves to Mason's `bash-debug-adapter` executable. No path to a local checkout of this repository is needed. The registry definition pins a release; update its version and VSIX filename when moving to a newer release.
 

@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+### [0.4.4](https://github.com/UltiWebAlt/vscode-bash-debug/compare/v0.4.3...v0.4.4) (2026-11-12)
+
+- Refresh setup documentation and require VS Code 1.146 or newer to match the API typings.
+- Update GitHub Actions setup-node and CodeQL actions.
+
 ### [0.4.3](https://github.com/UltiWebAlt/vscode-bash-debug/compare/v0.4.2...v0.4.3) (2026-11-12)
 
 - Make the environment validation timeout test reliable on fast CI runners.
