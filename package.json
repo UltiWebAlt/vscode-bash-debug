@@ -65,7 +65,7 @@
     "devDependencies": {
         "@types/jasmine": "^7.0.0",
         "@types/node": "^26.6.6",
-        "@types/vscode": "1.40.0",
+        "@types/vscode": "1.146.0",
         "@typescript-eslint/eslint-plugin": "^8.72.2",
         "@typescript-eslint/parser": "^8.72.2",
         "@vscode/vsce": "^4.1.1",
